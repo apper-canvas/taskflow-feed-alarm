@@ -227,9 +227,7 @@ function MainFeature({ boardId }) {
           !task.title.toLowerCase().includes(searchTerm.toLowerCase()) &&
           !task.description?.toLowerCase().includes(searchTerm.toLowerCase()) &&
           !(task.tags && task.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase())))
-          !(task.tags && task.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase())))
-          return false;
-        }
+        ) return false;
         
         return true;
       })
