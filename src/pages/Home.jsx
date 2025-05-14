@@ -1,82 +1,104 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { toast } from 'react-toastify';
+import { useDispatch, useSelector } from 'react-redux';
+import { fetchBoards, createBoard, deleteBoard } from '../services/boardService';
+import { setBoardsLoading, setBoardsSuccess, setBoardsError, setSelectedBoardId, addBoard, removeBoard } from '../store/boardsSlice';
 import MainFeature from '../components/MainFeature';
 import getIcon from '../utils/iconUtils';
 
 function Home() {
-  const [boards, setBoards] = useState(() => {
-    const savedBoards = localStorage.getItem('taskflow-boards');
-    return savedBoards ? JSON.parse(savedBoards) : [
-      {
-        id: '1',
-        name: 'Main Board',
-        description: 'Your primary task board',
-        createdAt: new Date().toISOString()
-      }
-    ];
-  });
-  
-  const [selectedBoard, setSelectedBoard] = useState(() => {
-    const savedSelectedBoard = localStorage.getItem('taskflow-selected-board');
-    return savedSelectedBoard || '1';
-  });
+  const dispatch = useDispatch();
+  const { boards, selectedBoardId, loading, error } = useSelector(state => state.boards);
   
   const [isCreatingBoard, setIsCreatingBoard] = useState(false);
   const [newBoardName, setNewBoardName] = useState('');
   const [newBoardDescription, setNewBoardDescription] = useState('');
+  
+  // Load boards on component mount
+  useEffect(() => {
+    const loadBoards = async () => {
+      try {
+        dispatch(setBoardsLoading());
+        const boardsData = await fetchBoards();
+        dispatch(setBoardsSuccess(boardsData));
+        
+        // Set selected board if none is selected or the selected one doesn't exist
+        if (!selectedBoardId && boardsData.length > 0) {
+          dispatch(setSelectedBoardId(boardsData[0].Id));
+        } else if (selectedBoardId && !boardsData.find(board => board.Id === selectedBoardId) && boardsData.length > 0) {
+          dispatch(setSelectedBoardId(boardsData[0].Id));
+        }
+      } catch (error) {
+        dispatch(setBoardsError(error.message));
+        toast.error("Failed to load boards");
+      }
+    };
+    
+    loadBoards();
+  }, [dispatch, selectedBoardId]);
   
   // Icons
   const PlusIcon = getIcon('Plus');
   const LayoutDashboardIcon = getIcon('LayoutDashboard');
   const TrashIcon = getIcon('Trash');
   const XIcon = getIcon('X');
-  
-  useEffect(() => {
-    localStorage.setItem('taskflow-boards', JSON.stringify(boards));
-  }, [boards]);
-  
-  useEffect(() => {
-    localStorage.setItem('taskflow-selected-board', selectedBoard);
-  }, [selectedBoard]);
-  
-  const handleCreateBoard = () => {
+  const LoadingIcon = getIcon('Loader');
+    
+  const handleCreateBoard = async () => {
     if (!newBoardName.trim()) {
       toast.error('Board name cannot be empty');
       return;
     }
     
-    const newBoard = {
-      id: Date.now().toString(),
-      name: newBoardName.trim(),
-      description: newBoardDescription.trim(),
-      createdAt: new Date().toISOString()
-    };
-    
-    setBoards(prev => [...prev, newBoard]);
-    setSelectedBoard(newBoard.id);
-    setIsCreatingBoard(false);
-    setNewBoardName('');
-    setNewBoardDescription('');
-    toast.success('Board created successfully');
+    try {
+      const boardData = {
+        name: newBoardName.trim(),
+        description: newBoardDescription.trim()
+      };
+      
+      const newBoard = await createBoard(boardData);
+      dispatch(addBoard(newBoard));
+      dispatch(setSelectedBoardId(newBoard.Id));
+      
+      setIsCreatingBoard(false);
+      setNewBoardName('');
+      setNewBoardDescription('');
+      toast.success('Board created successfully');
+    } catch (error) {
+      toast.error('Failed to create board');
+    }
   };
   
-  const handleDeleteBoard = (id) => {
+  const handleDeleteBoard = async (boardId) => {
     if (boards.length <= 1) {
       toast.error('Cannot delete the only board');
       return;
     }
     
-    setBoards(prev => prev.filter(board => board.id !== id));
-    
-    if (selectedBoard === id) {
-      setSelectedBoard(boards.find(board => board.id !== id)?.id || '');
+    try {
+      const success = await deleteBoard(boardId);
+      
+      if (success) {
+        // If the deleted board was the selected one, select another board
+        if (selectedBoardId === boardId) {
+          const remainingBoard = boards.find(board => board.Id !== boardId);
+          if (remainingBoard) {
+            dispatch(setSelectedBoardId(remainingBoard.Id));
+          }
+        }
+        
+        dispatch(removeBoard(boardId));
+        toast.success('Board deleted successfully');
+      } else {
+        toast.error('Failed to delete board');
+      }
+    } catch (error) {
+      toast.error('Error deleting board');
     }
-    
-    toast.success('Board deleted successfully');
   };
   
-  const currentBoard = boards.find(board => board.id === selectedBoard);
+  const currentBoard = boards.find(board => board.Id === selectedBoardId);
   
   return (
     <div className="space-y-6">
@@ -99,7 +121,22 @@ function Home() {
         </button>
       </div>
       
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+      {/* Loading and Error States */}
+      {loading && (
+        <div className="flex justify-center items-center p-8">
+          <LoadingIcon className="w-8 h-8 text-blue-600 animate-spin" />
+          <span className="ml-2 text-surface-600 dark:text-surface-400">Loading boards...</span>
+        </div>
+      )}
+      
+      {error && (
+        <div className="bg-red-100 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 text-center">
+          <p className="text-red-800 dark:text-red-200">Error: {error}</p>
+          <button onClick={() => window.location.reload()} className="mt-2 btn btn-outline text-red-600 dark:text-red-400">Retry</button>
+        </div>
+      )}
+      
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6" style={{ display: loading ? 'none' : 'grid' }}>
         <motion.div 
           className="lg:col-span-1 overflow-hidden"
           initial={{ opacity: 0, x: -20 }}
@@ -115,14 +152,14 @@ function Home() {
             <ul className="space-y-2">
               {boards.map(board => (
                 <li key={board.id} className="relative">
-                  <button
-                    onClick={() => setSelectedBoard(board.id)}
+                  <button 
+                    onClick={() => dispatch(setSelectedBoardId(board.Id))}
                     className={`w-full text-left p-3 rounded-lg transition-all flex justify-between items-center group ${
-                      selectedBoard === board.id
+                      selectedBoardId === board.Id
                         ? 'bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary-light'
                         : 'hover:bg-surface-200 dark:hover:bg-surface-700 text-surface-700 dark:text-surface-300'
                     }`}
-                  >
+                  > 
                     <span className="font-medium truncate">{board.name}</span>
                     
                     {boards.length > 1 && (
@@ -130,7 +167,7 @@ function Home() {
                         onClick={(e) => {
                           e.stopPropagation();
                           handleDeleteBoard(board.id);
-                        }}
+                        }} 
                         className="opacity-0 group-hover:opacity-100 p-1 rounded-full hover:bg-surface-300 dark:hover:bg-surface-600 transition-opacity"
                         aria-label="Delete board"
                       >
@@ -154,7 +191,7 @@ function Home() {
             <>
               <div className="mb-4">
                 <h2 className="text-xl font-bold text-surface-800 dark:text-white">
-                  {currentBoard.name}
+                  {currentBoard.Name}
                 </h2>
                 {currentBoard.description && (
                   <p className="text-surface-600 dark:text-surface-400 mt-1">
@@ -163,7 +200,7 @@ function Home() {
                 )}
               </div>
               
-              <MainFeature boardId={currentBoard.id} />
+              <MainFeature boardId={currentBoard.Id} />
             </>
           )}
         </motion.div>

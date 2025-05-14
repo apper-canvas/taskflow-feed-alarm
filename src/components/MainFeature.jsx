@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-toastify';
+import { useDispatch, useSelector } from 'react-redux';
+import { setTasksLoading, setTasksSuccess, setTasksError, addTask, updateTask, removeTask, setTaskFilter } from '../store/tasksSlice';
+import { fetchTasksByBoard, createTask, updateTask as updateTaskService, deleteTask, updateTaskStatus } from '../services/taskService';
 import getIcon from '../utils/iconUtils';
 import { format } from 'date-fns';
-
 // Define task status columns
 const COLUMNS = [
   { id: 'todo', name: 'To Do', color: 'bg-blue-500', icon: 'CheckCircle2' },
@@ -20,9 +22,26 @@ const PRIORITIES = [
 ];
 
 function MainFeature({ boardId }) {
-  const [tasks, setTasks] = useState(() => {
-    const savedTasks = localStorage.getItem(`taskflow-tasks-${boardId}`);
-    return savedTasks ? JSON.parse(savedTasks) : [];
+  const dispatch = useDispatch();
+  const { tasks: allTasks, loading, error, filterPriority, searchTerm, sortBy, sortDirection } = useSelector(state => state.tasks);
+  
+  // Get tasks for this board
+  const tasks = allTasks[boardId] || [];
+  
+  // Load tasks for this board
+  useEffect(() => {
+    const loadTasks = async () => {
+      try {
+        dispatch(setTasksLoading());
+        const tasksData = await fetchTasksByBoard(boardId);
+        dispatch(setTasksSuccess({ boardId, tasks: tasksData }));
+      } catch (error) {
+        dispatch(setTasksError(error.message));
+        toast.error("Failed to load tasks");
+      }
+    };
+    
+    loadTasks();
   });
   
   const [isCreatingTask, setIsCreatingTask] = useState(false);
@@ -54,17 +73,11 @@ function MainFeature({ boardId }) {
   const CheckCircle2Icon = getIcon('CheckCircle2');
   const ClockIcon = getIcon('Clock');
   const CheckCircleIcon = getIcon('CheckCircle');
+  const LoaderIcon = getIcon('Loader');
 
   // Filtering state
-  const [filterPriority, setFilterPriority] = useState('all');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState('createdAt'); // createdAt, dueDate, priority
-  const [sortDirection, setSortDirection] = useState('desc'); // asc, desc
-  const [showFilters, setShowFilters] = useState(false);
-
-  useEffect(() => {
-    localStorage.setItem(`taskflow-tasks-${boardId}`, JSON.stringify(tasks));
-  }, [tasks, boardId]);
+  const [showFilters, setShowFilters] = useState(false); 
+  
 
   // Reset form
   const resetTaskForm = () => {
@@ -80,43 +93,43 @@ function MainFeature({ boardId }) {
   };
 
   // Create or update task
-  const handleSaveTask = () => {
+  const handleSaveTask = async () => {
     if (!newTask.title.trim()) {
       toast.error('Task title is required');
       return;
     }
 
-    if (editingTask) {
-      // Update existing task
-      setTasks(prevTasks => 
-        prevTasks.map(task => 
-          task.id === editingTask 
-            ? { ...task, ...newTask, updatedAt: new Date().toISOString() }
-            : task
-        )
-      );
-      toast.success('Task updated successfully');
-    } else {
-      // Create new task
-      const task = {
-        id: Date.now().toString(),
-        ...newTask,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      setTasks(prevTasks => [...prevTasks, task]);
-      toast.success('Task created successfully');
+    try {
+      if (editingTask) {
+        // Update existing task
+        const taskToUpdate = tasks.find(task => task.id === editingTask);
+        if (taskToUpdate) {
+          const updatedTaskData = {
+            Id: taskToUpdate.Id,
+            ...newTask,
+            boardId: boardId
+          };
+          const updatedTask = await updateTaskService(updatedTaskData);
+          dispatch(updateTask({ boardId, task: updatedTask }));
+          toast.success('Task updated successfully');
+        }
+      } else {
+        // Create new task
+        const newTaskData = {
+          ...newTask,
+          boardId: boardId
+        };
+        const createdTask = await createTask(newTaskData);
+        dispatch(addTask({ boardId, task: createdTask }));
+        toast.success('Task created successfully');
+      }
+      
+      setIsCreatingTask(false);
+      setEditingTask(null);
+      resetTaskForm();
+    } catch (error) {
+      toast.error(editingTask ? 'Failed to update task' : 'Failed to create task');
     }
-
-    setIsCreatingTask(false);
-    setEditingTask(null);
-    resetTaskForm();
-  };
-
-  // Delete task
-  const handleDeleteTask = (id) => {
-    setTasks(prevTasks => prevTasks.filter(task => task.id !== id));
-    toast.success('Task deleted');
   };
 
   // Open edit modal
@@ -156,33 +169,45 @@ function MainFeature({ boardId }) {
   };
 
   // Handle drag start
-  const handleDragStart = (task) => {
+  const handleDragStart = (task) => { 
     setDraggingTask(task);
   };
 
   // Handle drag over column
-  const handleDragOver = (columnId, e) => {
+  const handleDragOver = (columnId, e) => { 
     e.preventDefault();
     setDropTargetColumn(columnId);
   };
 
-  // Handle drop
-  const handleDrop = (columnId) => {
-    if (draggingTask && draggingTask.status !== columnId) {
-      setTasks(prevTasks => 
-        prevTasks.map(task => 
-          task.id === draggingTask.id 
-            ? { 
-                ...task, 
-                status: columnId,
-                updatedAt: new Date().toISOString()
-              }
-            : task
-        )
-      );
-      toast.info(`Task moved to ${COLUMNS.find(col => col.id === columnId).name}`);
+  // Delete task
+  const handleDeleteTask = async (taskId) => {
+    try {
+      const success = await deleteTask(taskId);
+      if (success) {
+        dispatch(removeTask({ boardId, taskId }));
+        toast.success('Task deleted');
+      } else {
+        toast.error('Failed to delete task');
+      }
+    } catch (error) {
+      toast.error('Error deleting task');
     }
-    
+  };
+
+  // Handle drop
+  const handleDrop = async (columnId) => {
+    if (draggingTask && draggingTask.status !== columnId) {
+      try {
+        const success = await updateTaskStatus(draggingTask.Id, columnId);
+        if (success) {
+          const updatedTask = { ...draggingTask, status: columnId };
+          dispatch(updateTask({ boardId, task: updatedTask }));
+          toast.info(`Task moved to ${COLUMNS.find(col => col.id === columnId).name}`);
+        }
+      } catch (error) {
+        toast.error('Failed to update task status');
+      }
+    }
     setDraggingTask(null);
     setDropTargetColumn(null);
   };
@@ -202,7 +227,7 @@ function MainFeature({ boardId }) {
           !task.title.toLowerCase().includes(searchTerm.toLowerCase()) &&
           !task.description.toLowerCase().includes(searchTerm.toLowerCase()) &&
           !task.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()))
-        ) {
+            !(task.tags && task.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase())))
           return false;
         }
         
@@ -214,7 +239,7 @@ function MainFeature({ boardId }) {
         
         switch (sortBy) {
           case 'dueDate':
-            valA = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+              valA = a.dueDate ? new Date(a.dueDate).getTime() : Infinity; 
             valB = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
             break;
           case 'priority':
@@ -234,6 +259,11 @@ function MainFeature({ boardId }) {
 
   const filteredTasks = getFilteredAndSortedTasks();
 
+  // Set task filter in Redux
+  const handleFilterChange = (filterData) => {
+    dispatch(setTaskFilter(filterData));
+  };
+  
   // Get tasks for a specific column
   const getTasksForColumn = (columnId) => {
     return filteredTasks.filter(task => task.status === columnId);
@@ -282,9 +312,9 @@ function MainFeature({ boardId }) {
         
         <div className="flex flex-wrap gap-2 mb-3">
           {task.tags && task.tags.map(tag => (
-            <span 
-              key={tag} 
-              className="text-xs px-2 py-1 rounded-full bg-surface-200 dark:bg-surface-700 text-surface-800 dark:text-surface-200 flex items-center gap-1"
+            <span
+              key={tag}
+              className="text-xs px-2 py-1 rounded-full bg-surface-200 dark:bg-surface-700 text-surface-800 dark:text-surface-200 flex items-center gap-1" 
             >
               <TagIcon className="w-3 h-3" />
               {tag}
@@ -301,7 +331,7 @@ function MainFeature({ boardId }) {
           {task.dueDate && (
             <div className="flex items-center gap-1 text-surface-600 dark:text-surface-400">
               <CalendarIcon className="w-3 h-3" />
-              <span>{format(new Date(task.dueDate), 'MMM d')}</span>
+              <span>{format(new Date(task.dueDate), 'MMM d')}</span> 
             </div>
           )}
         </div>
@@ -332,7 +362,7 @@ function MainFeature({ boardId }) {
               type="text"
               placeholder="Search tasks..."
               className="input pl-9 w-full sm:w-64"
-              value={searchTerm}
+              value={searchTerm} 
               onChange={e => setSearchTerm(e.target.value)}
             />
           </div>
@@ -362,7 +392,7 @@ function MainFeature({ boardId }) {
                 <label className="label">Priority</label>
                 <select
                   className="input w-full"
-                  value={filterPriority}
+                  value={filterPriority} 
                   onChange={e => setFilterPriority(e.target.value)}
                 >
                   <option value="all">All Priorities</option>
@@ -391,7 +421,7 @@ function MainFeature({ boardId }) {
                 <label className="label">Sort Direction</label>
                 <button
                   onClick={() => setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
-                  className="input w-full flex justify-between items-center"
+                  className="input w-full flex justify-between items-center" 
                 >
                   <span>{sortDirection === 'asc' ? 'Ascending' : 'Descending'}</span>
                   <ArrowUpDownIcon className="w-4 h-4" />
@@ -402,6 +432,22 @@ function MainFeature({ boardId }) {
         )}
       </AnimatePresence>
       
+      {/* Loading and Error States */}
+      {loading && (
+        <div className="flex justify-center items-center p-8">
+          <LoaderIcon className="w-8 h-8 text-blue-600 animate-spin" />
+          <span className="ml-2 text-surface-600 dark:text-surface-400">Loading tasks...</span>
+        </div>
+      )}
+      
+      {error && (
+        <div className="bg-red-100 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 text-center">
+          <p className="text-red-800 dark:text-red-200">Error: {error}</p>
+          <button onClick={() => window.location.reload()} className="mt-2 btn btn-outline text-red-600 dark:text-red-400">Retry</button>
+        </div>
+      )}
+      
+      {!loading && !error && (
       {/* Task Columns */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {COLUMNS.map(column => {
@@ -459,6 +505,7 @@ function MainFeature({ boardId }) {
           );
         })}
       </div>
+      )}
       
       {/* Task Modal */}
       {isCreatingTask && (
