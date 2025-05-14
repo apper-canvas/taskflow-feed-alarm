@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-toastify';
 import { useDispatch, useSelector } from 'react-redux';
 import { setTasksLoading, setTasksSuccess, setTasksError, addTask, updateTask, removeTask, setTaskFilter } from '../store/tasksSlice';
-import { fetchTasksByBoard, createTask, updateTask as updateTaskService, deleteTask, updateTaskStatus } from '../services/taskService';
+import { fetchTasksByBoard, createTask, updateTask as apiUpdateTask, deleteTask, updateTaskStatus } from '../services/taskService';
 import getIcon from '../utils/iconUtils';
 import { format } from 'date-fns';
 // Define task status columns
@@ -109,7 +109,7 @@ function MainFeature({ boardId }) {
             ...newTask,
             boardId: boardId
           };
-          const updatedTask = await updateTaskService(updatedTaskData);
+          const updatedTask = await apiUpdateTask(updatedTaskData);
           dispatch(updateTask({ boardId, task: updatedTask }));
           toast.success('Task updated successfully');
         }
@@ -198,7 +198,7 @@ function MainFeature({ boardId }) {
   const handleDrop = async (columnId) => {
     if (draggingTask && draggingTask.status !== columnId) {
       try {
-        const success = await updateTaskStatus(draggingTask.Id, columnId);
+        const success = await updateTaskStatus(draggingTask.Id || draggingTask.id, columnId);
         if (success) {
           const updatedTask = { ...draggingTask, status: columnId };
           dispatch(updateTask({ boardId, task: updatedTask }));
@@ -226,6 +226,7 @@ function MainFeature({ boardId }) {
           searchTerm &&
           !task.title.toLowerCase().includes(searchTerm.toLowerCase()) &&
           !task.description?.toLowerCase().includes(searchTerm.toLowerCase()) &&
+          !(task.tags && task.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase())))
           !(task.tags && task.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase())))
           return false;
         }
