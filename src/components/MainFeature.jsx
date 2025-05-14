@@ -42,7 +42,7 @@ function MainFeature({ boardId }) {
     };
     
     loadTasks();
-  });
+  }, [boardId, dispatch]);
   
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
@@ -225,9 +225,8 @@ function MainFeature({ boardId }) {
         if (
           searchTerm &&
           !task.title.toLowerCase().includes(searchTerm.toLowerCase()) &&
-          !task.description.toLowerCase().includes(searchTerm.toLowerCase()) &&
-          !task.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()))
-            !(task.tags && task.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase())))
+          !task.description?.toLowerCase().includes(searchTerm.toLowerCase()) &&
+          !(task.tags && task.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase())))
           return false;
         }
         
@@ -263,6 +262,13 @@ function MainFeature({ boardId }) {
   const handleFilterChange = (filterData) => {
     dispatch(setTaskFilter(filterData));
   };
+
+  // Handle filter form state changes
+  const setFilterPriority = (value) => handleFilterChange({ filterPriority: value });
+  const setSearchTerm = (value) => handleFilterChange({ searchTerm: value });
+  const setSortBy = (value) => handleFilterChange({ sortBy: value });
+  const setSortDirection = (value) => handleFilterChange({ sortDirection: value });
+  
   
   // Get tasks for a specific column
   const getTasksForColumn = (columnId) => {
@@ -448,7 +454,6 @@ function MainFeature({ boardId }) {
       )}
       
       {!loading && !error && (
-      {/* Task Columns */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {COLUMNS.map(column => {
           const columnTasks = getTasksForColumn(column.id);
